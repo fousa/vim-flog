@@ -158,9 +158,9 @@ options = {
       :all      => true
     }
 
-flogger = Flog.new options
-flogger.flog ::VIM::Buffer.current.name
 begin
+  flogger = Flog.new options
+  flogger.flog ::VIM::Buffer.current.name
   show_complexity flogger.return_report
 rescue
 end
