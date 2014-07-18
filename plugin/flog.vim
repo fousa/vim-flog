@@ -45,6 +45,42 @@ ruby << EOF
 require 'rubygems'
 require 'flog'
 
+module RubyParserStuff
+
+  def handle_encoding str
+    str = str.dup
+    ruby19 = str.respond_to? :encoding
+    encoding = nil
+
+    header = str.lines.first(2)
+    header.map! { |s| s.force_encoding "ASCII-8BIT" } if ruby19
+
+    first = header.first || ""
+    encoding, str = "utf-8", str[3..-1] if first =~ /\A\xEF\xBB\xBF/
+
+    encoding = $1.strip if header.find { |s|
+      s[/^#.*?-\*-.*?coding:\s*([^ ;]+).*?-\*-/, 1] ||
+      s[/^#.*(?:en)?coding(?:\s*[:=])\s*([\w-]+)/, 1]
+    }
+
+    if encoding then
+      if ruby19 then
+        encoding.sub!(/utf-8-.+$/, 'utf-8') # HACK for stupid emacs formats
+        hack_encoding str, encoding
+      else
+        # Turn off the warning for the magic encoding comment
+        #     It blows up the command buffer in VIM
+        #warn "Skipping magic encoding comment"
+      end
+    else
+      # nothing specified... ugh. try to encode as utf-8
+      hack_encoding str if ruby19
+    end
+
+    str
+  end
+end
+
 class Flog
   def in_method(name, file, line, endline=nil)
     endline = line if endline.nil?
@@ -70,39 +106,6 @@ class Flog
     s()
   end
 
-  def process_iter(exp)
-    context = (self.context - [:class, :module, :scope])
-    context = context.uniq.sort_by { |s| s.to_s }
-
-    if context == [:block, :iter] or context == [:iter] then
-      recv = exp.first
-
-      # DSL w/ names. eg task :name do ... end
-      if (recv[0] == :call and recv[1] == nil and recv.arglist[1] and
-          [:lit, :str].include? recv.arglist[1][0]) then
-          msg = recv[2]
-          submsg = recv.arglist[1][1]
-          in_klass msg do
-            lastline = exp.last.respond_to?(:line) ? exp.last.line : nil # zomg teh hax!
-            # This is really weird. If a block has nothing in it, then for some
-            # strange reason exp.last becomes nil. I really don't care why this
-            # happens, just an annoying fact.
-            in_method submsg, exp.file, exp.line, lastline do
-              process_until_empty exp
-            end
-          end
-          return s()
-      end
-    end
-    add_to_score :branch
-    exp.delete 0
-    process exp.shift
-    penalize_by 0.1 do
-      process_until_empty exp
-    end
-    s()
-  end
-
   def return_report
     complexity_results = {}
     max = option[:all] ? nil : total * THRESHOLD
@@ -123,6 +126,7 @@ class Flog
 end
 
 def show_complexity(results = {})
+  return if Vim::Buffer.current.name.match("_spec")
   VIM.command ":silent sign unplace file=#{VIM::Buffer.current.name}"
   results.each do |line_number, rest|
     medium_limit = VIM::evaluate('s:medium_limit')
@@ -145,7 +149,7 @@ function! s:UpdateHighlighting()
   exe 'hi low_complexity    guifg='.s:low_color
   exe 'hi medium_complexity guifg='.s:medium_color
   exe 'hi high_complexity   guifg='.s:high_color
-	exe 'hi SignColumn        guifg=#999999 guibg='.s:background_color.' gui=NONE'
+  exe 'hi SignColumn        guifg=#999999 guibg='.s:background_color.' gui=NONE'
 endfunction
 
 function! ShowComplexity()
@@ -162,7 +166,6 @@ begin
   flogger = Flog.new options
   flogger.flog ::VIM::Buffer.current.name
   show_complexity flogger.return_report
-rescue
 end
 
 EOF
