@@ -126,7 +126,6 @@ class Flog
 end
 
 def show_complexity(results = {})
-  return if Vim::Buffer.current.name.match("_spec")
   VIM.command ":silent sign unplace file=#{VIM::Buffer.current.name}"
   results.each do |line_number, rest|
     medium_limit = VIM::evaluate('s:medium_limit')
